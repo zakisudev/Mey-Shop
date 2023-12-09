@@ -25,10 +25,9 @@ const LoginScreen = () => {
 
   useEffect(() => {
     if (userInfo) {
-      dispatch(setCredentials(userInfo));
       navigate(redirect);
     }
-  }, [userInfo, dispatch, navigate, redirect]);
+  }, [userInfo, navigate, redirect]);
 
   const submitHandler = async (e) => {
     e.preventDefault();
