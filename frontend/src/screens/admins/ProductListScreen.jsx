@@ -68,7 +68,7 @@ const ProductListScreen = () => {
       {isLoading ? (
         <Loader />
       ) : error ? (
-        <Message variant="danger">{error}</Message>
+        <Message variant="danger">{error.data.message}</Message>
       ) : data.products.length === 0 ? (
         <Message variant="info">No products found</Message>
       ) : (
