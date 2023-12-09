@@ -20,8 +20,8 @@ const LoginScreen = () => {
   const { userInfo } = useSelector((state) => state.auth);
 
   const { search } = useLocation();
-  const sP = new URLSearchParams(search);
-  const redirect = sP.get('redirect') || '/';
+  const sp = new URLSearchParams(search);
+  const redirect = sp.get('redirect') || '/';
 
   useEffect(() => {
     if (userInfo) {
@@ -36,7 +36,7 @@ const LoginScreen = () => {
       dispatch(setCredentials({ ...res }));
       navigate(redirect);
     } catch (err) {
-      toast.error(err.data.message || err.data.error);
+      toast.error(err?.data?.message || err.error);
     }
   };
 
