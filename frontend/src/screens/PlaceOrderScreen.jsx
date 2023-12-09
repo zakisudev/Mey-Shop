@@ -18,12 +18,12 @@ const PlaceOrderScreen = () => {
   const [createOrder, { isLoading, error }] = useCreateOrderMutation();
 
   useEffect(() => {
-    if (!shippingAddress.address) {
+    if (!shippingAddress || !shippingAddress.address) {
       navigate('/shipping');
     } else if (!paymentMethod) {
       navigate('/payment');
     }
-  }, [paymentMethod, shippingAddress.address, navigate]);
+  }, [paymentMethod, shippingAddress, navigate]);
 
   const placeOrderHandler = async () => {
     try {
