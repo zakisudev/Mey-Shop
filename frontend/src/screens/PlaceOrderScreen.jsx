@@ -23,7 +23,7 @@ const PlaceOrderScreen = () => {
     } else if (!paymentMethod) {
       navigate('/payment');
     }
-  }, [navigate, shippingAddress, paymentMethod]);
+  }, [paymentMethod, shippingAddress.address, navigate]);
 
   const placeOrderHandler = async () => {
     try {
