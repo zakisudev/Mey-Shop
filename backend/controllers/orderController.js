@@ -1,7 +1,10 @@
 import asyncHandler from '../middleware/asyncHandler.js';
 import Order from '../models/orderModel.js';
+import OrderItem from '../models/orderItemModel.js';
 import Product from '../models/productModel.js';
+import User from '../models/userModel.js';
 import { calcPrices } from '../utils/calcPrices.js';
+import { Op } from 'sequelize';
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -14,20 +17,26 @@ const addOrderItems = asyncHandler(async (req, res) => {
     throw new Error('No order items');
   } else {
     // get the ordered items from our database
-    const itemsFromDB = await Product.find({
-      _id: { $in: orderItems.map((x) => x._id) },
+    const productIds = orderItems.map((x) => parseInt(x._id || x.id));
+    const itemsFromDB = await Product.findAll({
+      where: {
+        id: {
+          [Op.in]: productIds,
+        },
+      },
     });
 
     // map over the order items and use the price from our items from database
     const dbOrderItems = orderItems.map((itemFromClient) => {
       const matchingItemFromDB = itemsFromDB.find(
-        (itemFromDB) => itemFromDB._id.toString() === itemFromClient._id
+        (itemFromDB) => itemFromDB.id === parseInt(itemFromClient._id || itemFromClient.id)
       );
       return {
-        ...itemFromClient,
-        product: itemFromClient._id,
+        name: itemFromClient.name,
+        qty: itemFromClient.qty,
+        image: itemFromClient.image,
         price: matchingItemFromDB.price,
-        _id: undefined,
+        productId: matchingItemFromDB.id,
       };
     });
 
@@ -35,9 +44,9 @@ const addOrderItems = asyncHandler(async (req, res) => {
     const { itemsPrice, taxPrice, shippingPrice, totalPrice } =
       calcPrices(dbOrderItems);
 
-    const order = new Order({
-      orderItems: dbOrderItems,
-      user: req.user._id,
+    // Create order
+    const order = await Order.create({
+      userId: req.user.id,
       shippingAddress,
       paymentMethod,
       itemsPrice,
@@ -46,9 +55,47 @@ const addOrderItems = asyncHandler(async (req, res) => {
       totalPrice,
     });
 
-    const createdOrder = await order.save();
+    // Create order items separately
+    await OrderItem.bulkCreate(
+      dbOrderItems.map((item) => ({
+        orderId: order.id,
+        productId: item.productId,
+        name: item.name,
+        qty: item.qty,
+        image: item.image,
+        price: item.price,
+      }))
+    );
 
-    res.status(201).json(createdOrder);
+    // Reload order with orderItems
+    const createdOrder = await Order.findByPk(order.id, {
+      include: [
+        {
+          model: OrderItem,
+          as: 'orderItems',
+          include: [
+            {
+              model: Product,
+              as: 'product',
+              attributes: ['id', 'name'],
+            },
+          ],
+        },
+      ],
+    });
+
+    // Format orderItems to match frontend expectations (include product as id)
+    const formattedOrder = {
+      ...createdOrder.toJSON(),
+      orderItems: createdOrder.orderItems.map((item) => ({
+        ...item.toJSON(),
+        product: item.productId, // Frontend expects 'product' field
+        _id: item.id, // Also include _id for compatibility
+      })),
+      _id: createdOrder.id, // Include _id for compatibility
+    };
+
+    res.status(201).json(formattedOrder);
   }
 });
 
@@ -56,9 +103,36 @@ const addOrderItems = asyncHandler(async (req, res) => {
 // @route   GET /api/orders/myorders
 // @access  Private
 const getMyOrders = asyncHandler(async (req, res) => {
-  const orders = await Order.find({ user: req.user._id });
+  const orders = await Order.findAll({
+    where: { userId: req.user.id },
+    include: [
+      {
+        model: OrderItem,
+        as: 'orderItems',
+        include: [
+          {
+            model: Product,
+            as: 'product',
+            attributes: ['id', 'name'],
+          },
+        ],
+      },
+    ],
+    order: [['createdAt', 'DESC']],
+  });
+  
   if (orders) {
-    res.status(200).json(orders);
+    // Format orders to match frontend expectations
+    const formattedOrders = orders.map((order) => ({
+      ...order.toJSON(),
+      _id: order.id,
+      orderItems: order.orderItems.map((item) => ({
+        ...item.toJSON(),
+        product: item.productId,
+        _id: item.id,
+      })),
+    }));
+    res.status(200).json(formattedOrders);
   } else {
     res.status(404);
     throw new Error('Resources not found');
@@ -69,12 +143,40 @@ const getMyOrders = asyncHandler(async (req, res) => {
 // @route   GET /api/orders/:id
 // @access  Private
 const getOrderById = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id).populate(
-    'user',
-    'name email'
-  );
+  const order = await Order.findByPk(req.params.id, {
+    include: [
+      {
+        model: User,
+        as: 'user',
+        attributes: ['id', 'name', 'email'],
+      },
+      {
+        model: OrderItem,
+        as: 'orderItems',
+        include: [
+          {
+            model: Product,
+            as: 'product',
+            attributes: ['id', 'name'],
+          },
+        ],
+      },
+    ],
+  });
+  
   if (order) {
-    res.status(200).json(order);
+    // Format order to match frontend expectations
+    const formattedOrder = {
+      ...order.toJSON(),
+      _id: order.id,
+      user: order.user ? { ...order.user.toJSON(), _id: order.user.id } : null,
+      orderItems: order.orderItems.map((item) => ({
+        ...item.toJSON(),
+        product: item.productId,
+        _id: item.id,
+      })),
+    };
+    res.status(200).json(formattedOrder);
   } else {
     res.status(404);
     throw new Error('Resource not found');
@@ -85,13 +187,39 @@ const getOrderById = asyncHandler(async (req, res) => {
 // @route   PUT /api/orders/:id/pay
 // @access  Private
 const updateOrderToPaid = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
+  const order = await Order.findByPk(req.params.id, {
+    include: [
+      {
+        model: OrderItem,
+        as: 'orderItems',
+        include: [
+          {
+            model: Product,
+            as: 'product',
+            attributes: ['id', 'name'],
+          },
+        ],
+      },
+    ],
+  });
+  
   if (order) {
     order.isPaid = true;
-    order.paidAt = Date.now();
+    order.paidAt = new Date();
     order.paymentResult = req.body;
     const updatedOrder = await order.save();
-    res.status(200).json(updatedOrder);
+    
+    const formattedOrder = {
+      ...updatedOrder.toJSON(),
+      _id: updatedOrder.id,
+      orderItems: order.orderItems.map((item) => ({
+        ...item.toJSON(),
+        product: item.productId,
+        _id: item.id,
+      })),
+    };
+    
+    res.status(200).json(formattedOrder);
   } else {
     res.status(404);
     throw new Error('Resource not found');
@@ -102,12 +230,38 @@ const updateOrderToPaid = asyncHandler(async (req, res) => {
 // @route   PUT /api/orders/:id/deliver
 // @access  Private/Admin
 const updateOrderToDelivered = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
+  const order = await Order.findByPk(req.params.id, {
+    include: [
+      {
+        model: OrderItem,
+        as: 'orderItems',
+        include: [
+          {
+            model: Product,
+            as: 'product',
+            attributes: ['id', 'name'],
+          },
+        ],
+      },
+    ],
+  });
+  
   if (order) {
     order.isDelivered = true;
-    order.deliveredAt = Date.now();
+    order.deliveredAt = new Date();
     const updatedOrder = await order.save();
-    res.status(200).json(updatedOrder);
+    
+    const formattedOrder = {
+      ...updatedOrder.toJSON(),
+      _id: updatedOrder.id,
+      orderItems: order.orderItems.map((item) => ({
+        ...item.toJSON(),
+        product: item.productId,
+        _id: item.id,
+      })),
+    };
+    
+    res.status(200).json(formattedOrder);
   } else {
     res.status(404);
     throw new Error('Resource not found');
@@ -118,9 +272,41 @@ const updateOrderToDelivered = asyncHandler(async (req, res) => {
 // @route   GET /api/orders
 // @access  Private/Admin
 const getOrders = asyncHandler(async (req, res) => {
-  const orders = await Order.find({}).populate('user', 'id name');
+  const orders = await Order.findAll({
+    include: [
+      {
+        model: User,
+        as: 'user',
+        attributes: ['id', 'name'],
+      },
+      {
+        model: OrderItem,
+        as: 'orderItems',
+        include: [
+          {
+            model: Product,
+            as: 'product',
+            attributes: ['id', 'name'],
+          },
+        ],
+      },
+    ],
+    order: [['createdAt', 'DESC']],
+  });
+  
   if (orders) {
-    res.status(200).json(orders);
+    // Format orders to match frontend expectations
+    const formattedOrders = orders.map((order) => ({
+      ...order.toJSON(),
+      _id: order.id,
+      user: order.user ? { ...order.user.toJSON(), _id: order.user.id } : null,
+      orderItems: order.orderItems.map((item) => ({
+        ...item.toJSON(),
+        product: item.productId,
+        _id: item.id,
+      })),
+    }));
+    res.status(200).json(formattedOrders);
   } else {
     res.status(404);
     throw new Error('Resources not found');

@@ -1,6 +1,7 @@
 import asyncHandler from './../middleware/asyncHandler.js';
 import User from '../models/userModel.js';
 import generateToken from '../utils/generateToken.js';
+import { Op } from 'sequelize';
 
 // @desc    Auth user & get token
 // @route   POST /api/users/login
@@ -10,14 +11,14 @@ const authUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
   // Find user by email
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ where: { email } });
 
   // Check if user exists and password matches
   if (user && (await user.matchPassword(password))) {
-    generateToken(res, user._id);
+    generateToken(res, user.id);
     // Return user data and token
     res.status(200).json({
-      _id: user._id,
+      _id: user.id,
       name: user.name,
       email: user.email,
       isAdmin: user.isAdmin,
@@ -37,7 +38,7 @@ const registerUser = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
 
   // Find user by email
-  const userExists = await User.findOne({ email });
+  const userExists = await User.findOne({ where: { email } });
 
   // Check if user exists
   if (userExists) {
@@ -55,10 +56,10 @@ const registerUser = asyncHandler(async (req, res) => {
 
   // Check if user was created
   if (user) {
-    generateToken(res, user._id);
+    generateToken(res, user.id);
     // Return user data and token
     res.status(201).json({
-      _id: user._id,
+      _id: user.id,
       name: user.name,
       email: user.email,
       isAdmin: user.isAdmin,
@@ -85,13 +86,15 @@ const logoutUser = asyncHandler(async (req, res) => {
 // @access  Private
 const getUserProfile = asyncHandler(async (req, res) => {
   // Find user by id
-  const user = await User.findById(req.user._id);
+  const user = await User.findByPk(req.user.id, {
+    attributes: { exclude: ['password'] },
+  });
 
   // Check if user exists
   if (user) {
     // Return user data
     res.status(200).json({
-      _id: user._id,
+      _id: user.id,
       name: user.name,
       email: user.email,
       isAdmin: user.isAdmin,
@@ -108,7 +111,7 @@ const getUserProfile = asyncHandler(async (req, res) => {
 // @access  Private
 const updateUserProfile = asyncHandler(async (req, res) => {
   // Find user by id
-  const user = await User.findById(req.user._id);
+  const user = await User.findByPk(req.user.id);
 
   // Check if user exists
   if (user) {
@@ -126,7 +129,7 @@ const updateUserProfile = asyncHandler(async (req, res) => {
 
     // Return user data and token
     res.status(200).json({
-      _id: updatedUser._id,
+      _id: updatedUser.id,
       name: updatedUser.name,
       email: updatedUser.email,
       isAdmin: user.isAdmin,
@@ -143,7 +146,9 @@ const updateUserProfile = asyncHandler(async (req, res) => {
 // @access  Private/Admin
 const getUsers = asyncHandler(async (req, res) => {
   // Find all users
-  const users = await User.find({});
+  const users = await User.findAll({
+    attributes: { exclude: ['password'] },
+  });
   // Return users
   res.status(200).json(users);
 });
@@ -153,7 +158,9 @@ const getUsers = asyncHandler(async (req, res) => {
 // @access  Private/Admin
 const getUserById = asyncHandler(async (req, res) => {
   // Find user by id
-  const user = await User.findById(req.params.id).select('-password');
+  const user = await User.findByPk(req.params.id, {
+    attributes: { exclude: ['password'] },
+  });
 
   // Check if user exists
   if (user) {
@@ -171,7 +178,7 @@ const getUserById = asyncHandler(async (req, res) => {
 // @access  Private/Admin
 const deleteUser = asyncHandler(async (req, res) => {
   // Find user by id
-  const user = await User.findById(req.params.id);
+  const user = await User.findByPk(req.params.id);
 
   // Check if user exists
   if (user) {
@@ -181,7 +188,7 @@ const deleteUser = asyncHandler(async (req, res) => {
       throw new Error('Cannot delete admin user');
     }
     // Delete user
-    await user.deleteOne({ _id: user._id });
+    await user.destroy();
     // Return message
     res.status(200).json({ message: 'User deleted successfully' });
   } else {
@@ -196,7 +203,7 @@ const deleteUser = asyncHandler(async (req, res) => {
 // @access  Private/Admin
 const updateUser = asyncHandler(async (req, res) => {
   // Find user by id
-  const user = await User.findById(req.params.id);
+  const user = await User.findByPk(req.params.id);
 
   // Check if user exists
   if (user) {
@@ -210,7 +217,7 @@ const updateUser = asyncHandler(async (req, res) => {
 
     // Return user data
     res.status(200).json({
-      _id: updatedUser._id,
+      _id: updatedUser.id,
       name: updatedUser.name,
       email: updatedUser.email,
       isAdmin: updatedUser.isAdmin,

@@ -1,48 +1,93 @@
-import mongoose from 'mongoose';
+import { sequelize } from '../config/db.js';
+import { DataTypes } from 'sequelize';
+import User from './userModel.js';
 
-const orderSchema = new mongoose.Schema(
+const Order = sequelize.define(
+  'Order',
   {
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    orderItems: [
-      {
-        name: { type: String, required: true },
-        qty: { type: Number, required: true },
-        image: { type: String, required: true },
-        price: { type: String, required: true },
-        product: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Product',
-          required: true,
-        },
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: User,
+        key: 'id',
       },
-    ],
+    },
     shippingAddress: {
-      address: { type: String, required: true },
-      city: { type: String, required: true },
-      postalCode: { type: String, required: true },
-      country: { type: String, required: true },
+      type: DataTypes.JSON,
+      allowNull: false,
+      get() {
+        const value = this.getDataValue('shippingAddress');
+        return typeof value === 'string' ? JSON.parse(value) : value;
+      },
+      set(value) {
+        this.setDataValue('shippingAddress', JSON.stringify(value));
+      },
     },
-    paymentMethod: { type: String, required: true },
+    paymentMethod: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
     paymentResult: {
-      id: { type: String },
-      status: { type: String },
-      update_time: { type: String },
-      email_address: { type: String },
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null,
+      get() {
+        const value = this.getDataValue('paymentResult');
+        return value && typeof value === 'string' ? JSON.parse(value) : value;
+      },
+      set(value) {
+        this.setDataValue('paymentResult', value ? JSON.stringify(value) : null);
+      },
     },
-    itemsPrice: { type: String, required: true, default: 0.0 },
-    taxPrice: { type: String, required: true, default: 0.0 },
-    shippingPrice: { type: String, required: true },
-    totalPrice: { type: String, required: true, default: 0.0 },
-    isPaid: { type: Boolean, default: false },
-    paidAt: { type: Date },
-    isDelivered: { type: Boolean, default: false },
-    deliveredAt: { type: Date },
+    itemsPrice: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+    },
+    taxPrice: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+    },
+    shippingPrice: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+    },
+    totalPrice: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+    },
+    isPaid: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    paidAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    isDelivered: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    deliveredAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     timestamps: true,
+    tableName: 'orders',
   }
 );
 
-const order = mongoose.model('Order', orderSchema);
+// Define associations - OrderItem associations will be set up separately
+Order.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
-export default order;
+export default Order;

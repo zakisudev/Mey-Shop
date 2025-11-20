@@ -4,12 +4,14 @@ import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
 dotenv.config();
 import connectDB from './config/db.js';
+import './models/index.js'; // Import to set up model associations
 import productRoutes from './routes/productRoute.js';
 import userRoutes from './routes/userRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 import { notFound, errorHandler } from './middleware/errorMiddleware.js';
-const port = process.env.PORT || 5000;
+// Support both PORT and NODEJS_PORT for cPanel compatibility
+const port = process.env.PORT || process.env.NODEJS_PORT || 5000;
 
 connectDB();
 const app = express();
@@ -33,7 +35,7 @@ app.get('/api/config/paypal', (req, res) =>
 
 // make uploads folder static
 const __dirname = path.resolve();
-app.use('/upload', express.static(path.join(__dirname, 'frontend', ' public')));
+app.use('/upload', express.static(path.join(__dirname, 'frontend', 'public')));
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'frontend', 'build')));

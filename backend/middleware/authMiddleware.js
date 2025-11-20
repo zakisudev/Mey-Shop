@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import asyncHandler from 'express-async-handler';
 import User from '../models/userModel.js';
+import { Op } from 'sequelize';
 
 // Protect routes
 const protect = asyncHandler(async (req, res, next) => {
@@ -14,7 +15,14 @@ const protect = asyncHandler(async (req, res, next) => {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
       // Find user by id from decoded token
-      req.user = await User.findById(decoded.userId).select('-password');
+      req.user = await User.findByPk(decoded.userId, {
+        attributes: { exclude: ['password'] },
+      });
+
+      if (!req.user) {
+        res.status(401);
+        throw new Error('Unauthorized access, user not found');
+      }
 
       // Call next middleware
       next();

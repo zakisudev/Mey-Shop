@@ -1,9 +1,8 @@
-import { isValidObjectId } from 'mongoose';
-
 function checkObjectId(req, res, next) {
-  if (!isValidObjectId(req.params.id)) {
+  const id = parseInt(req.params.id);
+  if (isNaN(id) || id <= 0) {
     res.status(404);
-    throw new Error(`Invalid ObjectId of:  ${req.params.id}`);
+    throw new Error(`Invalid ID: ${req.params.id}`);
   }
   next();
 }

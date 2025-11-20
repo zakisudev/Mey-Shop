@@ -1,29 +1,84 @@
 import asyncHandler from '../middleware/asyncHandler.js';
 import Product from '../models/productModel.js';
+import Review from '../models/reviewModel.js';
+import User from '../models/userModel.js';
+import { Op, Sequelize } from 'sequelize';
 
 // @desc    Fetch all products
 // @route   GET /api/products
 // @access  Public
 const getProducts = asyncHandler(async (req, res) => {
-  const pageSize = process.env.PAGINATION_LIMIT || 10;
+  const pageSize = parseInt(process.env.PAGINATION_LIMIT) || 10;
   const page = Number(req.query.pageNumber) || 1;
-  const keyword = req.query.keyword
-    ? { name: { $regex: req.query.keyword, $options: 'i' } }
-    : {};
-  const count = await Product.countDocuments({ ...keyword });
-  const products = await Product.find({ ...keyword })
-    .limit(pageSize)
-    .skip(pageSize * (page - 1));
-  res.status(200).json({ products, page, pages: Math.ceil(count / pageSize) });
+  
+  const whereClause = {};
+  if (req.query.keyword) {
+    whereClause.name = {
+      [Op.like]: `%${req.query.keyword}%`,
+    };
+  }
+  
+  const count = await Product.count({ where: whereClause });
+  const products = await Product.findAll({
+    where: whereClause,
+    limit: pageSize,
+    offset: pageSize * (page - 1),
+    include: [
+      {
+        model: Review,
+        as: 'reviews',
+        required: false,
+      },
+    ],
+  });
+  
+  // Format products to include _id for frontend compatibility
+  const formattedProducts = products.map((product) => ({
+    ...product.toJSON(),
+    _id: product.id,
+    reviews: product.reviews ? product.reviews.map((review) => ({
+      ...review.toJSON(),
+      _id: review.id,
+      user: review.userId,
+    })) : [],
+  }));
+  
+  res.status(200).json({ products: formattedProducts, page, pages: Math.ceil(count / pageSize) });
 });
 
 // @desc    Fetch single product
 // @route   GET /api/products/:id
 // @access  Public
 const getProductById = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
+  const product = await Product.findByPk(req.params.id, {
+    include: [
+      {
+        model: Review,
+        as: 'reviews',
+        required: false,
+        include: [
+          {
+            model: User,
+            as: 'user',
+            attributes: ['id', 'name'],
+            required: false,
+          },
+        ],
+      },
+    ],
+  });
+  
   if (product) {
-    res.status(200).json(product);
+    const formattedProduct = {
+      ...product.toJSON(),
+      _id: product.id,
+      reviews: product.reviews ? product.reviews.map((review) => ({
+        ...review.toJSON(),
+        _id: review.id,
+        user: review.user ? review.user.id : review.userId,
+      })) : [],
+    };
+    res.status(200).json(formattedProduct);
   } else {
     throw new Error('Resource not found');
   }
@@ -33,10 +88,10 @@ const getProductById = asyncHandler(async (req, res) => {
 // @route   POST /api/products
 // @access  Private/Admin
 const createProduct = asyncHandler(async (req, res) => {
-  const product = new Product({
+  const product = await Product.create({
     name: 'Sample product name',
     price: 0,
-    user: req.user._id,
+    userId: req.user.id,
     image: '/images/sample.jpg',
     brand: 'Sample brand',
     category: 'Sample category',
@@ -45,8 +100,12 @@ const createProduct = asyncHandler(async (req, res) => {
     description: 'Sample description',
   });
 
-  const createdProduct = await product.save();
-  res.status(201).json(createdProduct);
+  const formattedProduct = {
+    ...product.toJSON(),
+    _id: product.id,
+  };
+
+  res.status(201).json(formattedProduct);
 });
 
 // @desc    Update a product
@@ -55,7 +114,8 @@ const createProduct = asyncHandler(async (req, res) => {
 const updateProduct = asyncHandler(async (req, res) => {
   const { name, price, description, image, brand, category, countInStock } =
     req.body;
-  const product = await Product.findById(req.params.id);
+  const product = await Product.findByPk(req.params.id);
+  
   if (product) {
     product.name = name;
     product.price = price;
@@ -66,7 +126,11 @@ const updateProduct = asyncHandler(async (req, res) => {
     product.countInStock = countInStock;
 
     const updatedProduct = await product.save();
-    res.status(200).json(updatedProduct);
+    const formattedProduct = {
+      ...updatedProduct.toJSON(),
+      _id: updatedProduct.id,
+    };
+    res.status(200).json(formattedProduct);
   } else {
     res.status(404);
     throw new Error('Resource not found');
@@ -77,10 +141,10 @@ const updateProduct = asyncHandler(async (req, res) => {
 // @route  DELETE /api/products/:id
 // @access Private/Admin
 const deleteProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findById(req.params.id);
+  const product = await Product.findByPk(req.params.id);
 
   if (product) {
-    await product.deleteOne({ _id: product.id });
+    await product.destroy();
     res.status(200).json({ message: 'Product removed' });
   } else {
     res.status(404);
@@ -93,26 +157,49 @@ const deleteProduct = asyncHandler(async (req, res) => {
 // @access Private
 const createProductReview = asyncHandler(async (req, res) => {
   const { rating, comment } = req.body;
-  const product = await Product.findById(req.params.id);
+  const product = await Product.findByPk(req.params.id, {
+    include: [
+      {
+        model: Review,
+        as: 'reviews',
+        required: false,
+      },
+    ],
+  });
+  
   if (product) {
-    const alreadyReviewed = product.reviews.find(
-      (review) => review.user.toString() === req.user._id.toString()
-    );
-    if (alreadyReviewed) {
+    // Check if user already reviewed this product
+    const existingReviews = await Review.findAll({
+      where: {
+        productId: product.id,
+        userId: req.user.id,
+      },
+    });
+    
+    if (existingReviews.length > 0) {
       res.status(400);
       throw new Error('Product already reviewed');
     }
-    const review = {
+    
+    // Create new review
+    await Review.create({
       name: req.user.name,
       rating: Number(rating),
       comment,
-      user: req.user._id,
-    };
-    product.reviews.push(review);
-    product.numReviews = product.reviews.length;
+      userId: req.user.id,
+      productId: product.id,
+    });
+    
+    // Recalculate rating and numReviews
+    const allReviews = await Review.findAll({
+      where: { productId: product.id },
+    });
+    
+    product.numReviews = allReviews.length;
     product.rating =
-      product.reviews.reduce((acc, review) => acc + review.rating, 0) /
-      product.reviews.length;
+      allReviews.reduce((acc, review) => acc + Number(review.rating), 0) /
+      allReviews.length;
+    
     await product.save();
 
     res.status(201).json({ message: 'Review added' });
@@ -126,8 +213,30 @@ const createProductReview = asyncHandler(async (req, res) => {
 // @route   GET /api/products/top
 // @access  Public
 const getTopProducts = asyncHandler(async (req, res) => {
-  const products = await Product.find({}).sort({ rating: -1 }).limit(3);
-  res.status(200).json(products);
+  const products = await Product.findAll({
+    order: [['rating', 'DESC']],
+    limit: 3,
+    include: [
+      {
+        model: Review,
+        as: 'reviews',
+        required: false,
+      },
+    ],
+  });
+  
+  // Format products to include _id for frontend compatibility
+  const formattedProducts = products.map((product) => ({
+    ...product.toJSON(),
+    _id: product.id,
+    reviews: product.reviews ? product.reviews.map((review) => ({
+      ...review.toJSON(),
+      _id: review.id,
+      user: review.userId,
+    })) : [],
+  }));
+  
+  res.status(200).json(formattedProducts);
 });
 
 export {
